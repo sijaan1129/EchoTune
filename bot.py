@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ====== CONFIGURATION ======
-GUILD_ID = 123456789012345678  # <-- Replace with your Discord server ID
+GUILD_ID = 1319414646234677302  # <-- Replace with your Discord server ID
 guild = discord.Object(id=GUILD_ID)
 
 intents = discord.Intents.default()
