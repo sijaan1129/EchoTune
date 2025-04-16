@@ -1,1 +1,13 @@
-
+services:
+  - type: worker
+    name: music-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: DISCORD_TOKEN
+        value: YOUR_DISCORD_BOT_TOKEN
+      - key: SPOTIFY_CLIENT_ID
+        value: YOUR_SPOTIFY_CLIENT_ID
+      - key: SPOTIFY_CLIENT_SECRET
+        value: YOUR_SPOTIFY_CLIENT_SECRET
