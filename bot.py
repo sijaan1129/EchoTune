@@ -19,7 +19,14 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 queues = {}  # guild_id: [url, url, ...]
 
-YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': True}
+YDL_OPTIONS = {
+    'format': 'bestaudio',
+    'noplaylist': True,
+    'cookies': 'cookies.txt',  # <- Add this line
+    'quiet': True,
+    'default_search': 'ytsearch',
+    'source_address': '0.0.0.0',
+}
 FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1', 'options': '-vn'}
 
 class Music(commands.Cog):
