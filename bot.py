@@ -47,44 +47,49 @@ class Music(commands.Cog):
         else:
             self.current[guild_id] = None
 
-       @app_commands.command(name="play", description="Play a song by name or URL (YouTube/Spotify)")
-async def play(self, interaction: discord.Interaction, query: str):
-    await interaction.response.defer()
+class Music(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        # other initialization code
 
-    guild_id = interaction.guild.id
+    @app_commands.command(name="play", description="Play a song by name or URL (YouTube/Spotify)")
+    async def play(self, interaction: discord.Interaction, query: str):
+        await interaction.response.defer()
 
-    if "spotify.com" in query:
-        query = get_spotify_track(query)
+        guild_id = interaction.guild.id
 
-    elif not query.startswith("http"):
-        # It's not a URL, treat it as a search
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            try:
-                info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
-                query = info['webpage_url']
-            except IndexError:
-                return await interaction.followup.send("❌ No results found for your search query.")
-            except Exception as e:
-                print(f"Error during search: {e}")
-                return await interaction.followup.send(f"❌ Something went wrong while searching: {e}")
+        if "spotify.com" in query:
+            query = get_spotify_track(query)
 
-    voice_channel = interaction.user.voice.channel
-    if not voice_channel:
-        return await interaction.followup.send("You must be in a voice channel!")
+        elif not query.startswith("http"):
+            # It's not a URL, treat it as a search
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                try:
+                    info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
+                    query = info['webpage_url']
+                except IndexError:
+                    return await interaction.followup.send("❌ No results found for your search query.")
+                except Exception as e:
+                    print(f"Error during search: {e}")
+                    return await interaction.followup.send(f"❌ Something went wrong while searching: {e}")
 
-    vc = interaction.guild.voice_client
-    if not vc:
-        vc = await voice_channel.connect()
+        voice_channel = interaction.user.voice.channel
+        if not voice_channel:
+            return await interaction.followup.send("You must be in a voice channel!")
 
-    if not queues.get(guild_id):
-        queues[guild_id] = []
+        vc = interaction.guild.voice_client
+        if not vc:
+            vc = await voice_channel.connect()
 
-    if not vc.is_playing():
-        queues[guild_id].insert(0, query)
-        await self.play_next(interaction, guild_id)
-    else:
-        queues[guild_id].append(query)
-        await interaction.followup.send("Added to queue ✅")
+        if not queues.get(guild_id):
+            queues[guild_id] = []
+
+        if not vc.is_playing():
+            queues[guild_id].insert(0, query)
+            await self.play_next(interaction, guild_id)
+        else:
+            queues[guild_id].append(query)
+            await interaction.followup.send("Added to queue ✅")
 
     @app_commands.command(name="pause", description="Pause the current song")
     async def pause(self, interaction: discord.Interaction):
