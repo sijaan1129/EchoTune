@@ -47,8 +47,7 @@ class Music(commands.Cog):
         else:
             self.current[guild_id] = None
 
-    @app_commands.command(name="play", description="Play a song by name or URL (YouTube/Spotify)")
-    async def play(self, interaction: discord.Interaction, query: str):
+       async def play(self, interaction: discord.Interaction, query: str):
         await interaction.response.defer()
 
         guild_id = interaction.guild.id
@@ -57,12 +56,16 @@ class Music(commands.Cog):
             query = get_spotify_track(query)
 
         elif not query.startswith("http"):
+            # It's not a URL, treat it as a search
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
                 try:
                     info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
                     query = info['webpage_url']
+                except IndexError:
+                    return await interaction.followup.send("❌ No results found for your search query.")
                 except Exception as e:
-                    return await interaction.followup.send("❌ Could not find the song.")
+                    print(f"Error during search: {e}")
+                    return await interaction.followup.send(f"❌ Something went wrong while searching: {e}")
 
         voice_channel = interaction.user.voice.channel
         if not voice_channel:
