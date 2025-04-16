@@ -4,6 +4,7 @@ from discord.ext import commands
 import asyncio
 import yt_dlp
 import os
+import random
 from keep_alive import keep_alive
 from spotify_utils import get_spotify_track
 from dotenv import load_dotenv
@@ -17,17 +18,22 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-queues = {}  # guild_id: [url, url, ...]
+queues = {}    # guild_id: [url, ...]
+loops = {}     # guild_id: "off"|"single"|"queue"
+volumes = {}   # guild_id: float (0.0–1.0)
 
 YDL_OPTIONS = {
     'format': 'bestaudio',
     'noplaylist': True,
-    'cookies': 'cookies.txt',  # <- Add this line
+    'cookies': 'cookies.txt',
     'quiet': True,
     'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
 }
-FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1', 'options': '-vn'}
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1',
+    'options': '-vn'
+}
 
 class Music(commands.Cog):
     def __init__(self, bot):
@@ -35,6 +41,15 @@ class Music(commands.Cog):
         self.current = {}  # guild_id: {title, thumbnail, url}
 
     async def play_next(self, interaction, guild_id):
+        mode = loops.get(guild_id, "off")
+        # handle loop modes
+        if self.current.get(guild_id) and mode in ("single", "queue"):
+            url = self.current[guild_id]['url']
+            if mode == "single":
+                queues[guild_id].insert(0, url)
+            else:
+                queues[guild_id].append(url)
+
         if queues.get(guild_id):
             next_url = queues[guild_id].pop(0)
             vc = interaction.guild.voice_client
@@ -45,8 +60,13 @@ class Music(commands.Cog):
                 thumbnail = info.get('thumbnail')
                 self.current[guild_id] = {'title': title, 'thumbnail': thumbnail, 'url': next_url}
 
-            vc.play(discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
-                    after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(interaction, guild_id), bot.loop))
+            # apply volume
+            volume = volumes.get(guild_id, 1.0)
+            source = discord.PCMVolumeTransformer(
+                discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
+                volume=volume
+            )
+            vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(interaction, guild_id), self.bot.loop))
 
             embed = discord.Embed(title="Now Playing 🎶", description=title, color=0x1DB954)
             embed.set_thumbnail(url=thumbnail)
@@ -54,49 +74,41 @@ class Music(commands.Cog):
         else:
             self.current[guild_id] = None
 
-class Music(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        # other initialization code
-
     @app_commands.command(name="play", description="Play a song by name or URL (YouTube/Spotify)")
     async def play(self, interaction: discord.Interaction, query: str):
-        await interaction.response.defer()
-
+        await interaction.response.send_message("🔍 Searching...", ephemeral=True)
         guild_id = interaction.guild.id
 
+        # Spotify link handling
         if "spotify.com" in query:
             query = get_spotify_track(query)
-
+        # search if not URL
         elif not query.startswith("http"):
-            # It's not a URL, treat it as a search
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
                 try:
                     info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
                     query = info['webpage_url']
-                except IndexError:
-                    return await interaction.followup.send("❌ No results found for your search query.")
-                except Exception as e:
-                    print(f"Error during search: {e}")
-                    return await interaction.followup.send(f"❌ Something went wrong while searching: {e}")
+                except Exception:
+                    return await interaction.edit_original_response(content="❌ No results found.")
 
-        voice_channel = interaction.user.voice.channel
-        if not voice_channel:
-            return await interaction.followup.send("You must be in a voice channel!")
-
+        # voice connect
         vc = interaction.guild.voice_client
         if not vc:
+            voice_channel = interaction.user.voice.channel
+            if not voice_channel:
+                return await interaction.edit_original_response(content="❌ You must be in a voice channel!")
             vc = await voice_channel.connect()
 
-        if not queues.get(guild_id):
-            queues[guild_id] = []
-
+        # queue
+        queues.setdefault(guild_id, [])
         if not vc.is_playing():
             queues[guild_id].insert(0, query)
             await self.play_next(interaction, guild_id)
         else:
             queues[guild_id].append(query)
-            await interaction.followup.send("Added to queue ✅")
+            return await interaction.edit_original_response(content="✅ Added to queue.")
+
+        await interaction.delete_original_response()
 
     @app_commands.command(name="pause", description="Pause the current song")
     async def pause(self, interaction: discord.Interaction):
@@ -131,7 +143,7 @@ class Music(commands.Cog):
         q = queues.get(guild_id, [])
         if not q:
             return await interaction.response.send_message("The queue is empty.")
-        desc = "\n".join([f"{idx+1}. {url}" for idx, url in enumerate(q)])
+        desc = "\n".join([f"{i+1}. {u}" for i, u in enumerate(q)])
         embed = discord.Embed(title="🎵 Music Queue", description=desc, color=0x5865F2)
         await interaction.response.send_message(embed=embed)
 
@@ -156,40 +168,69 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message("I'm not connected to a voice channel.")
 
+    @app_commands.command(name="volume", description="Set playback volume (0–100%)")
+    @app_commands.describe(level="Volume level from 0 to 100")
+    async def volume(self, interaction: discord.Interaction, level: int):
+        if level < 0 or level > 100:
+            return await interaction.response.send_message("❌ Volume must be 0–100.")
+        guild_id = interaction.guild.id
+        volumes[guild_id] = level / 100.0
+        vc = interaction.guild.voice_client
+        if vc and vc.source:
+            vc.source.volume = volumes[guild_id]
+        await interaction.response.send_message(f"🔊 Volume set to {level}%")
+
+    @app_commands.command(name="loop", description="Toggle loop mode: off, single, or queue")
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="off", value="off"),
+        app_commands.Choice(name="single", value="single"),
+        app_commands.Choice(name="queue", value="queue"),
+    ])
+    async def loop(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
+        loops[interaction.guild.id] = mode.value
+        await interaction.response.send_message(f"🔁 Loop mode set to {mode.name}")
+
+    @app_commands.command(name="shuffle", description="Shuffle the current queue")
+    async def shuffle(self, interaction: discord.Interaction):
+        guild_id = interaction.guild.id
+        q = queues.get(guild_id, [])
+        if not q:
+            return await interaction.response.send_message("The queue is empty.")
+        random.shuffle(q)
+        await interaction.response.send_message("🔀 Queue shuffled.")
+
+    @app_commands.command(name="clear", description="Clear the current music queue")
+    async def clear(self, interaction: discord.Interaction):
+        queues[interaction.guild.id] = []
+        await interaction.response.send_message("🗑️ Queue cleared.")
+
     @app_commands.command(name="help", description="List all commands and features")
     async def help(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="🎵 Music Bot Commands",
-            description="Here’s what I can do:",
-            color=0x00FFAB
-        )
-
-        embed.add_field(name="/play [name or URL]", value="Play a song from YouTube or Spotify", inline=False)
-        embed.add_field(name="/pause", value="Pause the current song", inline=False)
-        embed.add_field(name="/resume", value="Resume the paused song", inline=False)
-        embed.add_field(name="/skip", value="Skip the current song", inline=False)
-        embed.add_field(name="/queue", value="Show the current queue", inline=False)
-        embed.add_field(name="/nowplaying", value="Show the currently playing song", inline=False)
-        embed.add_field(name="/stop", value="Stop music and leave voice channel", inline=False)
-        embed.add_field(name="/help", value="Show this help message", inline=False)
-
+        embed = discord.Embed(title="🎵 Music Bot Commands", description="Here’s what I can do:", color=0x00FFAB)
+        cmds = [
+            ("/play [name or URL]", "Play a song from YouTube or Spotify"),
+            ("/pause", "Pause the current song"),
+            ("/resume", "Resume the paused song"),
+            ("/skip", "Skip the current song"),
+            ("/queue", "Show the current queue"),
+            ("/nowplaying", "Show the currently playing song"),
+            ("/stop", "Stop music and leave voice channel"),
+            ("/volume [0-100]", "Set playback volume"),
+            ("/loop [off|single|queue]", "Toggle loop mode"),
+            ("/shuffle", "Shuffle the current queue"),
+            ("/clear", "Clear the music queue"),
+            ("/help", "Show this help message"),
+        ]
+        for name, desc in cmds:
+            embed.add_field(name=name, value=desc, inline=False)
         embed.set_footer(text="Developed with ❤️ by Aimbot")
         await interaction.response.send_message(embed=embed)
 
 @bot.event
 async def on_ready():
+    bot.add_cog(Music(bot))
     print(f"Logged in as {bot.user}")
     await bot.tree.sync()
-
-music = Music(bot)
-bot.tree.add_command(music.play)
-bot.tree.add_command(music.pause)
-bot.tree.add_command(music.resume)
-bot.tree.add_command(music.skip)
-bot.tree.add_command(music.queue_cmd)
-bot.tree.add_command(music.nowplaying)
-bot.tree.add_command(music.stop)
-bot.tree.add_command(music.help)
 
 keep_alive()
 bot.run(os.getenv("DISCORD_TOKEN"))
