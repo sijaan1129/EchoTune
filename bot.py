@@ -10,21 +10,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+GUILD_ID = discord.Object(id=1319418774398566430)
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.guilds = True
 
-GUILD_ID = discord.Object(id=1319418774398566430)
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-queues = {}  # guild_id: [url, url, ...]
+queues = {}
 
 YDL_OPTIONS = {
     'format': 'bestaudio',
     'noplaylist': True,
-    'cookies': 'cookies.txt',  # Make sure this path is correct
+    'cookies': 'cookies.txt',
     'quiet': True,
     'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
@@ -34,7 +34,7 @@ FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1', 'optio
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.current = {}  # guild_id: {title, thumbnail, url}
+        self.current = {}
 
     async def play_next(self, interaction, guild_id):
         if queues.get(guild_id):
@@ -183,9 +183,12 @@ class Music(commands.Cog):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    await bot.tree.sync(guild=GUILD_ID)  # Sync only to your guild for instant availability
+    try:
+        await bot.tree.sync(guild=GUILD_ID)
+        print("Slash commands synced to guild!")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
 
 bot.add_cog(Music(bot))
-
 keep_alive()
 bot.run(os.getenv("DISCORD_TOKEN"))
