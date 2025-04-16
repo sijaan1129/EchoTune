@@ -10,8 +10,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GUILD_ID = discord.Object(id=1319418774398566430)
-
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
@@ -19,7 +17,7 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-queues = {}
+queues = {}  # guild_id: [url, url, ...]
 
 YDL_OPTIONS = {
     'format': 'bestaudio',
@@ -29,12 +27,15 @@ YDL_OPTIONS = {
     'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
 }
-FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1', 'options': '-vn'}
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1',
+    'options': '-vn'
+}
 
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.current = {}
+        self.current = {}  # guild_id: {title, thumbnail, url}
 
     async def play_next(self, interaction, guild_id):
         if queues.get(guild_id):
@@ -48,7 +49,8 @@ class Music(commands.Cog):
                 self.current[guild_id] = {'title': title, 'thumbnail': thumbnail, 'url': next_url}
 
             vc.play(discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
-                    after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(interaction, guild_id), bot.loop))
+                    after=lambda e: asyncio.run_coroutine_threadsafe(
+                        self.play_next(interaction, guild_id), bot.loop))
 
             embed = discord.Embed(title="Now Playing 🎶", description=title, color=0x1DB954)
             embed.set_thumbnail(url=thumbnail)
@@ -57,7 +59,6 @@ class Music(commands.Cog):
             self.current[guild_id] = None
 
     @app_commands.command(name="play", description="Play a song by name or URL (YouTube/Spotify)")
-    @app_commands.guilds(GUILD_ID)
     async def play(self, interaction: discord.Interaction, query: str):
         await interaction.response.defer()
 
@@ -74,11 +75,11 @@ class Music(commands.Cog):
                 except IndexError:
                     return await interaction.followup.send("❌ No results found for your search query.")
                 except Exception as e:
-                    print(f"Error during search: {e}")
-                    return await interaction.followup.send(f"❌ Something went wrong while searching: {e}")
+                    return await interaction.followup.send(f"❌ Error: {e}")
 
-        voice_channel = interaction.user.voice.channel
-        if not voice_channel:
+        try:
+            voice_channel = interaction.user.voice.channel
+        except:
             return await interaction.followup.send("You must be in a voice channel!")
 
         vc = interaction.guild.voice_client
@@ -96,7 +97,6 @@ class Music(commands.Cog):
             await interaction.followup.send("Added to queue ✅")
 
     @app_commands.command(name="pause", description="Pause the current song")
-    @app_commands.guilds(GUILD_ID)
     async def pause(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         if vc and vc.is_playing():
@@ -106,7 +106,6 @@ class Music(commands.Cog):
             await interaction.response.send_message("Nothing is playing.")
 
     @app_commands.command(name="resume", description="Resume the paused song")
-    @app_commands.guilds(GUILD_ID)
     async def resume(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         if vc and vc.is_paused():
@@ -116,7 +115,6 @@ class Music(commands.Cog):
             await interaction.response.send_message("Nothing is paused.")
 
     @app_commands.command(name="skip", description="Skip the current song")
-    @app_commands.guilds(GUILD_ID)
     async def skip(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         if vc and vc.is_playing():
@@ -126,7 +124,6 @@ class Music(commands.Cog):
             await interaction.response.send_message("Nothing is playing.")
 
     @app_commands.command(name="queue", description="Show the current queue")
-    @app_commands.guilds(GUILD_ID)
     async def queue_cmd(self, interaction: discord.Interaction):
         guild_id = interaction.guild.id
         q = queues.get(guild_id, [])
@@ -137,7 +134,6 @@ class Music(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="nowplaying", description="Show the currently playing song")
-    @app_commands.guilds(GUILD_ID)
     async def nowplaying(self, interaction: discord.Interaction):
         guild_id = interaction.guild.id
         now = self.current.get(guild_id)
@@ -148,7 +144,6 @@ class Music(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="stop", description="Stop music and leave voice channel")
-    @app_commands.guilds(GUILD_ID)
     async def stop(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         if vc:
@@ -160,7 +155,6 @@ class Music(commands.Cog):
             await interaction.response.send_message("I'm not connected to a voice channel.")
 
     @app_commands.command(name="help", description="List all commands and features")
-    @app_commands.guilds(GUILD_ID)
     async def help(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="🎵 Music Bot Commands",
@@ -183,11 +177,9 @@ class Music(commands.Cog):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    try:
-        await bot.tree.sync(guild=GUILD_ID)
-        print("Slash commands synced to guild!")
-    except Exception as e:
-        print(f"Error syncing commands: {e}")
+    guild = discord.Object(id=1319418774398566430)
+    await bot.tree.sync(guild=guild)
+    print("Commands synced!")
 
 bot.add_cog(Music(bot))
 keep_alive()
