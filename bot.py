@@ -10,19 +10,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+guild_id = 1319418774398566430  # Replace with your actual guild ID
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 queues = {}  # guild_id: [url, url, ...]
 
 YDL_OPTIONS = {
     'format': 'bestaudio',
     'noplaylist': True,
-    'cookies': 'cookies.txt',  # Make sure this path is correct
+    'cookies': 'cookies.txt',
     'quiet': True,
     'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
@@ -50,34 +50,36 @@ class Music(commands.Cog):
 
             embed = discord.Embed(title="Now Playing 🎶", description=title, color=0x1DB954)
             embed.set_thumbnail(url=thumbnail)
-            await interaction.channel.send(embed=embed)
+            await interaction.followup.send(embed=embed)
         else:
             self.current[guild_id] = None
 
     @app_commands.command(name="play", description="Play a song by name or URL (YouTube/Spotify)")
+    @app_commands.guilds(discord.Object(id=guild_id))
     async def play(self, interaction: discord.Interaction, query: str):
-        await interaction.response.send_message()
-
+        await interaction.response.defer()
         guild_id = interaction.guild.id
 
         if "spotify.com" in query:
-            query = get_spotify_track(query)
+            try:
+                query = get_spotify_track(query)
+            except Exception:
+                return await interaction.followup.send("❌ Failed to fetch Spotify track.")
 
         elif not query.startswith("http"):
-            # It's not a URL, treat it as a search
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
                 try:
                     info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
                     query = info['webpage_url']
                 except IndexError:
-                    return await interaction.followup.send("❌ No results found for your search query.")
+                    return await interaction.followup.send("❌ No results found.")
                 except Exception as e:
-                    print(f"Error during search: {e}")
-                    return await interaction.followup.send(f"❌ Something went wrong while searching: {e}")
+                    return await interaction.followup.send(f"❌ Error: {e}")
 
-        voice_channel = interaction.user.voice.channel
-        if not voice_channel:
-            return await interaction.followup.send("You must be in a voice channel!")
+        try:
+            voice_channel = interaction.user.voice.channel
+        except AttributeError:
+            return await interaction.followup.send("❌ You must be in a voice channel.")
 
         vc = interaction.guild.voice_client
         if not vc:
@@ -91,9 +93,10 @@ class Music(commands.Cog):
             await self.play_next(interaction, guild_id)
         else:
             queues[guild_id].append(query)
-            await interaction.followup.send("Added to queue ✅")
+            await interaction.followup.send("✅ Added to queue")
 
     @app_commands.command(name="pause", description="Pause the current song")
+    @app_commands.guilds(discord.Object(id=guild_id))
     async def pause(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         if vc and vc.is_playing():
@@ -103,6 +106,7 @@ class Music(commands.Cog):
             await interaction.response.send_message("Nothing is playing.")
 
     @app_commands.command(name="resume", description="Resume the paused song")
+    @app_commands.guilds(discord.Object(id=guild_id))
     async def resume(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         if vc and vc.is_paused():
@@ -112,6 +116,7 @@ class Music(commands.Cog):
             await interaction.response.send_message("Nothing is paused.")
 
     @app_commands.command(name="skip", description="Skip the current song")
+    @app_commands.guilds(discord.Object(id=guild_id))
     async def skip(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         if vc and vc.is_playing():
@@ -121,6 +126,7 @@ class Music(commands.Cog):
             await interaction.response.send_message("Nothing is playing.")
 
     @app_commands.command(name="queue", description="Show the current queue")
+    @app_commands.guilds(discord.Object(id=guild_id))
     async def queue_cmd(self, interaction: discord.Interaction):
         guild_id = interaction.guild.id
         q = queues.get(guild_id, [])
@@ -131,6 +137,7 @@ class Music(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="nowplaying", description="Show the currently playing song")
+    @app_commands.guilds(discord.Object(id=guild_id))
     async def nowplaying(self, interaction: discord.Interaction):
         guild_id = interaction.guild.id
         now = self.current.get(guild_id)
@@ -141,6 +148,7 @@ class Music(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="stop", description="Stop music and leave voice channel")
+    @app_commands.guilds(discord.Object(id=guild_id))
     async def stop(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
         if vc:
@@ -152,13 +160,13 @@ class Music(commands.Cog):
             await interaction.response.send_message("I'm not connected to a voice channel.")
 
     @app_commands.command(name="help", description="List all commands and features")
+    @app_commands.guilds(discord.Object(id=guild_id))
     async def help(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="🎵 Music Bot Commands",
             description="Here’s what I can do:",
             color=0x00FFAB
         )
-
         embed.add_field(name="/play [name or URL]", value="Play a song from YouTube or Spotify", inline=False)
         embed.add_field(name="/pause", value="Pause the current song", inline=False)
         embed.add_field(name="/resume", value="Resume the paused song", inline=False)
@@ -167,24 +175,18 @@ class Music(commands.Cog):
         embed.add_field(name="/nowplaying", value="Show the currently playing song", inline=False)
         embed.add_field(name="/stop", value="Stop music and leave voice channel", inline=False)
         embed.add_field(name="/help", value="Show this help message", inline=False)
-
         embed.set_footer(text="Developed with ❤️ by Aimbot")
         await interaction.response.send_message(embed=embed)
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    await bot.tree.sync()  # Sync commands to all servers
+    try:
+        synced = await bot.tree.sync(guild=discord.Object(id=guild_id))
+        print(f"Synced {len(synced)} commands.")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
 
-music = Music(bot)
-bot.tree.add_command(music.play)
-bot.tree.add_command(music.pause)
-bot.tree.add_command(music.resume)
-bot.tree.add_command(music.skip)
-bot.tree.add_command(music.queue_cmd)
-bot.tree.add_command(music.nowplaying)
-bot.tree.add_command(music.stop)
-bot.tree.add_command(music.help)
-
+bot.add_cog(Music(bot))
 keep_alive()
 bot.run(os.getenv("DISCORD_TOKEN"))
