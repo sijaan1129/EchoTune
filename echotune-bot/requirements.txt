@@ -1,5 +1,0 @@
-discord.py
-wavelink
-motor
-pymongo
-flask
